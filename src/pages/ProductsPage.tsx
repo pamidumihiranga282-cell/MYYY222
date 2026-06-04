@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
-import { ShoppingCart, Star, Search, SlidersHorizontal } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { ShoppingCart, Star, Search, SlidersHorizontal, ArrowRight } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const ProductsPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -151,8 +153,25 @@ interface ProductCardProps {
 }
 
 const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
+
+  const handleAddToCart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentUser) {
+      toast.error('Please login to add items to cart');
+      navigate('/login');
+      return;
+    }
+    onAddToCart(product);
+  };
+
   return (
-    <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl overflow-hidden group hover:border-amber-600/50 hover:shadow-xl hover:shadow-amber-900/20 transition-all">
+    <Link
+      to={`/products/${product.id}`}
+      className="block bg-[#1a0800] border border-amber-900/30 rounded-2xl overflow-hidden group hover:border-amber-600/50 hover:shadow-xl hover:shadow-amber-900/20 transition-all cursor-pointer"
+    >
       <div className="relative overflow-hidden aspect-square bg-amber-950">
         {product.isNew && (
           <div className="absolute top-2 left-2 z-10 bg-green-500 text-white text-xs px-2 py-0.5 rounded-full font-medium">New</div>
@@ -166,25 +185,31 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
           className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
           onError={e => { (e.target as HTMLImageElement).src = '/images/dubai-choc-1.jpg'; }}
         />
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
+        {/* View detail hint */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center gap-1 pointer-events-none">
+          <ArrowRight size={28} className="text-white drop-shadow-lg" />
+          <span className="text-white text-xs font-semibold bg-black/50 px-2 py-0.5 rounded-full whitespace-nowrap">View Details</span>
+        </div>
         <button
-          onClick={() => onAddToCart(product)}
+          onClick={handleAddToCart}
           className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 transition-all whitespace-nowrap"
         >
           <ShoppingCart size={14} /> Add to Cart
         </button>
       </div>
       <div className="p-3">
-        <Link to={`/products/${product.id}`}>
-          <h3 className="text-white font-medium text-sm leading-tight hover:text-amber-400 transition-colors line-clamp-2">
-            {product.name}
-          </h3>
-        </Link>
+        <h3 className="text-white font-medium text-sm leading-tight group-hover:text-amber-400 transition-colors line-clamp-2">
+          {product.name}
+        </h3>
         <div className="flex items-center gap-1 mt-1 mb-2">
           {[...Array(5)].map((_, i) => (
             <Star key={i} size={10} className="text-amber-500 fill-amber-500" />
           ))}
         </div>
+        {product.category && (
+          <div className="text-amber-500/60 text-xs mb-1 font-medium">{product.category}</div>
+        )}
         <div className="flex items-center justify-between">
           <div>
             <span className="text-amber-400 font-bold">Rs. {product.price.toLocaleString()}</span>
@@ -194,11 +219,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onAddToCart }) => {
           </div>
           <span className="text-amber-200/40 text-xs">{product.weight}kg</span>
         </div>
-        {product.stock <= 0 && (
+        {product.stock <= 0 ? (
           <div className="mt-2 text-xs text-red-400 font-medium">Out of Stock</div>
+        ) : (
+          <div className="mt-2 text-xs text-green-400/70 font-medium">In Stock</div>
         )}
       </div>
-    </div>
+    </Link>
   );
 };
 

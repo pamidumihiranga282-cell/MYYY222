@@ -185,11 +185,20 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
   });
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showNewCategory, setShowNewCategory] = useState(false);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Derive unique categories from existing products
+  const existingCategories = Array.from(
+    new Set(products.map(p => p.category).filter(Boolean))
+  ).sort();
 
   const openAdd = () => {
     setEditing(null);
     setForm({ name: '', description: '', price: 0, originalPrice: 0, category: '', stock: 0, weight: 0.25, featured: false, isNew: false, discount: 0, imageUrl: '' });
+    setShowNewCategory(false);
+    setNewCategoryInput('');
     setShowForm(true);
   };
 
@@ -201,6 +210,8 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
       stock: p.stock, weight: p.weight, featured: p.featured,
       isNew: p.isNew || false, discount: p.discount || 0, imageUrl: p.imageUrl,
     });
+    setShowNewCategory(false);
+    setNewCategoryInput('');
     setShowForm(true);
   };
 
@@ -319,9 +330,74 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
             </div>
             <div>
               <label className="text-amber-300 text-xs font-medium block mb-1">Category</label>
-              <input type="text" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
-                placeholder="Dubai Bars, Gift Boxes, Truffles..." />
+              {!showNewCategory ? (
+                <div className="space-y-2">
+                  <select
+                    value={form.category}
+                    onChange={e => {
+                      if (e.target.value === '__add_new__') {
+                        setShowNewCategory(true);
+                        setNewCategoryInput('');
+                      } else {
+                        setForm(f => ({ ...f, category: e.target.value }));
+                      }
+                    }}
+                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 [&>option]:bg-[#1a0800]"
+                  >
+                    <option value="" className="bg-[#1a0800] text-amber-200/50">— Select a category —</option>
+                    {existingCategories.map(cat => (
+                      <option key={cat} value={cat} className="bg-[#1a0800] text-white">{cat}</option>
+                    ))}
+                    <option value="__add_new__" className="bg-amber-900 text-amber-300 font-semibold">➕ Add New Category...</option>
+                  </select>
+                  {form.category && (
+                    <div className="flex items-center gap-2 text-xs text-amber-400">
+                      <span className="bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-full">{form.category}</span>
+                      <button type="button" onClick={() => setForm(f => ({ ...f, category: '' }))} className="text-amber-200/40 hover:text-red-400 transition-colors">✕ clear</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryInput}
+                      onChange={e => setNewCategoryInput(e.target.value)}
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && newCategoryInput.trim()) {
+                          setForm(f => ({ ...f, category: newCategoryInput.trim() }));
+                          setShowNewCategory(false);
+                        }
+                        if (e.key === 'Escape') { setShowNewCategory(false); }
+                      }}
+                      className="flex-1 bg-amber-950/30 border border-amber-500/50 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
+                      placeholder="e.g. Dubai Bars, Gift Boxes, Truffles..."
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (newCategoryInput.trim()) {
+                          setForm(f => ({ ...f, category: newCategoryInput.trim() }));
+                          setShowNewCategory(false);
+                        }
+                      }}
+                      className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewCategory(false)}
+                      className="bg-amber-900/30 text-amber-400 hover:bg-amber-900/50 px-3 py-2.5 rounded-xl text-sm transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <p className="text-amber-200/40 text-xs">Press Enter or click Add to confirm the new category.</p>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-amber-300 text-xs font-medium block mb-1">Stock</label>

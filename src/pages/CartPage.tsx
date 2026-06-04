@@ -7,6 +7,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Order, ShippingAddress, OrderItem } from '../types';
 import { getWhatsAppMessage, openWhatsAppPopup } from '../utils/whatsapp';
+import { sendOrderConfirmationToAdmin, sendOrderConfirmationToCustomer } from '../utils/email';
 import toast from 'react-hot-toast';
 
 const CartPage: React.FC = () => {
@@ -19,41 +20,36 @@ const CartPage: React.FC = () => {
   const [form, setForm] = useState<ShippingAddress>({
     fullName: userData?.displayName || '',
     phone: userData?.phone || '',
-    addressLine1: '',
+    addressLine1: userData?.address || '',
     addressLine2: '',
-    city: '',
+    city: userData?.city || '',
     district: '',
     postalCode: '',
   });
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [notes, setNotes] = useState('');
 
-  const generateTracking = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return 'MRM' + Array.from({ length: 7 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  };
-
   const handlePlaceOrder = async () => {
-    if (!currentUser) { navigate('/login'); return; }
     if (!form.fullName || !form.phone || !form.addressLine1 || !form.city || !form.district) {
-      return toast.error('Please fill all required fields');
+      return toast.error('Please fill in all required fields');
     }
     setPlacing(true);
+
     try {
-      const trackingNumber = generateTracking();
-      const orderItems: OrderItem[] = items.map(i => ({
-        productId: i.productId,
-        productName: i.product.name,
-        productImage: i.product.imageUrl,
-        price: i.product.price,
-        quantity: i.quantity,
-        weight: i.product.weight,
+      const trackingNumber = 'TRK' + Math.floor(100000 + Math.random() * 900000);
+      const orderItems: OrderItem[] = items.map(item => ({
+        productId: item.productId,
+        productName: item.product.name,
+        productImage: item.product.imageUrl,
+        price: item.product.price,
+        quantity: item.quantity,
+        weight: item.product.weight,
       }));
 
       const orderData = {
         trackingNumber,
-        userId: currentUser.uid,
-        userEmail: currentUser.email || '',
+        userId: currentUser?.uid || 'guest',
+        userEmail: currentUser?.email || 'guest@mrm.com',
         userName: form.fullName,
         userPhone: form.phone,
         items: orderItems,
@@ -71,11 +67,19 @@ const CartPage: React.FC = () => {
       const docRef = await addDoc(collection(db, 'orders'), orderData);
       const order = { id: docRef.id, ...orderData } as unknown as Order;
 
-      // WhatsApp notification
+      // WhatsApp notification - always goes to admin's WhatsApp support number
       const msg = getWhatsAppMessage(order);
-      const phone = form.phone.startsWith('0') ? '94' + form.phone.slice(1) : form.phone;
-      const waUrl = openWhatsAppPopup(phone, msg);
+      const adminPhone = '94707070872';
+      const waUrl = openWhatsAppPopup(adminPhone, msg);
+      
+      // Auto open WhatsApp popup immediately
+      window.open(waUrl, '_blank');
+      
       setWhatsappPopup({ url: waUrl, message: msg, trackingNumber, paymentMethod, total });
+
+      // Send email notifications
+      sendOrderConfirmationToAdmin(order);
+      sendOrderConfirmationToCustomer(order);
 
       clearCart();
       toast.success('🎉 Order placed successfully!');

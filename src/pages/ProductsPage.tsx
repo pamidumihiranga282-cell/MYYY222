@@ -82,9 +82,9 @@ const ProductsPage: React.FC = () => {
             onChange={e => setSortBy(e.target.value)}
             className="bg-[#1a0800] border border-amber-900/30 text-amber-200 rounded-xl px-4 py-3 focus:outline-none focus:border-amber-500"
           >
-            <option value="newest">Newest First</option>
-            <option value="price-asc">Price: Low to High</option>
-            <option value="price-desc">Price: High to Low</option>
+            <option value="newest" className="bg-[#1a0800] text-white">Newest First</option>
+            <option value="price-asc" className="bg-[#1a0800] text-white">Price: Low to High</option>
+            <option value="price-desc" className="bg-[#1a0800] text-white">Price: High to Low</option>
           </select>
           <button
             onClick={() => setShowFilters(!showFilters)}

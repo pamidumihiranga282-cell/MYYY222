@@ -252,7 +252,7 @@ const AccountPage: React.FC = () => {
                 <div className="mb-6">
                   <a
                     href={openWhatsAppPopup(
-                      selectedOrder.userPhone.startsWith('0') ? '94' + selectedOrder.userPhone.slice(1) : selectedOrder.userPhone,
+                      '94707070872',
                       getWhatsAppMessage(selectedOrder)
                     )}
                     target="_blank"

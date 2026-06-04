@@ -107,4 +107,9 @@ export interface SiteSettings {
   announcementEnabled: boolean;
   aboutUs?: string;
   updatedAt?: any;
+  emailjsServiceId?: string;
+  emailjsTemplateIdAdmin?: string;
+  emailjsTemplateIdCustomer?: string;
+  emailjsTemplateIdStatus?: string;
+  emailjsPublicKey?: string;
 }

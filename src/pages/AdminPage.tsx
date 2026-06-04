@@ -5,15 +5,17 @@ import {
   serverTimestamp, query, orderBy, setDoc, getDoc
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { db, storage, auth } from '../firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
 import { Product, Order, User, SiteSettings, OrderStatus } from '../types';
 import {
   Package, Users, ShoppingBag, Settings, Plus, Edit3, Trash2,
-  Save, X, Upload, Bell, BarChart3, Image, MessageCircle
+  Save, X, Upload, Bell, BarChart3, Image, MessageCircle, Mail
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getWhatsAppMessage, getStatusUpdateMessage } from '../utils/whatsapp';
+import { sendOrderStatusUpdate } from '../utils/email';
 
 const ADMIN_EMAIL = 'mrmshopping2025@gmail.com';
 
@@ -207,13 +209,23 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
     if (!file) return;
     if (!file.type.startsWith('image/')) return toast.error('Please select an image file');
     setUploading(true);
-    try {
-      // Try Firebase Storage first
+    
+    const storagePromise = (async () => {
       const storageRef = ref(storage, `products/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      return await getDownloadURL(storageRef);
+    })();
+    
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 2000)
+    );
+
+    try {
+      // Try Firebase Storage with 2s timeout
+      const url = await Promise.race([storagePromise, timeoutPromise]);
       setForm(f => ({ ...f, imageUrl: url }));
       toast.success('Image uploaded to cloud storage!');
+      setUploading(false);
     } catch {
       // Fallback: convert to base64 Data URL stored directly
       try {
@@ -222,14 +234,17 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
           const dataUrl = ev.target?.result as string;
           setForm(f => ({ ...f, imageUrl: dataUrl }));
           toast.success('Image loaded locally (base64)!');
+          setUploading(false);
         };
-        reader.onerror = () => toast.error('Failed to read image file');
+        reader.onerror = () => {
+          toast.error('Failed to read image file');
+          setUploading(false);
+        };
         reader.readAsDataURL(file);
       } catch {
         toast.error('Image upload failed');
+        setUploading(false);
       }
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -316,13 +331,13 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
             <div>
               <label className="text-amber-300 text-xs font-medium block mb-1">Weight (kg) *</label>
               <select value={form.weight} onChange={e => setForm(f => ({ ...f, weight: +e.target.value }))}
-                className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500">
-                <option value="0.1">0.1 kg</option>
-                <option value="0.15">0.15 kg</option>
-                <option value="0.25">0.25 kg</option>
-                <option value="0.5">0.5 kg</option>
-                <option value="0.75">0.75 kg</option>
-                <option value="1">1.0 kg</option>
+                className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 [&>option]:bg-amber-950">
+                <option value="0.1" className="bg-[#1a0800] text-white">0.1 kg</option>
+                <option value="0.15" className="bg-[#1a0800] text-white">0.15 kg</option>
+                <option value="0.25" className="bg-[#1a0800] text-white">0.25 kg</option>
+                <option value="0.5" className="bg-[#1a0800] text-white">0.5 kg</option>
+                <option value="0.75" className="bg-[#1a0800] text-white">0.75 kg</option>
+                <option value="1" className="bg-[#1a0800] text-white">1.0 kg</option>
               </select>
             </div>
             <div>
@@ -462,8 +477,12 @@ const OrdersManager: React.FC<{ orders: Order[]; onRefresh: () => void }> = ({ o
       });
       toast.success('Order status updated!');
       // WhatsApp notification URL
-      const updatedOrder = { ...selectedOrder, status: newStatus, statusHistory };
-      const msg = getStatusUpdateMessage(updatedOrder as Order);
+      const updatedOrder = { ...selectedOrder, status: newStatus, statusHistory } as unknown as Order;
+      
+      // Send email notification on status update
+      sendOrderStatusUpdate(updatedOrder);
+
+      const msg = getStatusUpdateMessage(updatedOrder);
       const phone = selectedOrder.userPhone.startsWith('0') ? '94' + selectedOrder.userPhone.slice(1) : selectedOrder.userPhone;
       const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
       window.open(waUrl, '_blank');
@@ -561,8 +580,8 @@ const OrdersManager: React.FC<{ orders: Order[]; onRefresh: () => void }> = ({ o
             <div className="mb-4">
               <label className="text-amber-300 text-xs font-medium block mb-1">New Status</label>
               <select value={newStatus} onChange={e => setNewStatus(e.target.value as OrderStatus)}
-                className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500">
-                {statusOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 [&>option]:bg-amber-950">
+                {statusOptions.map(s => <option key={s.value} value={s.value} className="bg-[#1a0800] text-white">{s.label}</option>)}
               </select>
             </div>
             <div className="mb-6">
@@ -715,10 +734,27 @@ const UsersManager: React.FC<{ users: User[]; onRefresh: () => void }> = ({ user
                 <label className="text-amber-300 text-xs font-medium block mb-1">Role</label>
                 <select value={userForm.role} onChange={e => setUserForm(u => ({ ...u, role: e.target.value as 'admin' | 'customer' }))}
                   disabled={editingUser.email === ADMIN_EMAIL}
-                  className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500">
-                  <option value="customer">Customer</option>
-                  <option value="admin">Admin</option>
+                  className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 [&>option]:bg-amber-950">
+                  <option value="customer" className="bg-[#1a0800] text-white">Customer</option>
+                  <option value="admin" className="bg-[#1a0800] text-white">Admin</option>
                 </select>
+              </div>
+              <div className="border-t border-amber-900/30 pt-4">
+                <label className="text-amber-300 text-xs font-medium block mb-2 flex items-center gap-1.5"><Mail size={12} /> Reset User Password</label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await sendPasswordResetEmail(auth, editingUser.email);
+                      toast.success('Password reset email sent to user!');
+                    } catch {
+                      toast.error('Failed to send password reset email');
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 bg-amber-900/40 text-amber-300 border border-amber-800/40 py-2 rounded-xl text-xs font-medium hover:bg-amber-900/60 transition-colors"
+                >
+                  Send Password Reset Link
+                </button>
               </div>
             </div>
 
@@ -752,6 +788,11 @@ const SiteSettingsManager: React.FC<{ settings: SiteSettings | null; onRefresh: 
     specialDiscount: settings?.specialOffer?.discount || 0,
     announcement: settings?.announcement || '',
     announcementEnabled: settings?.announcementEnabled || false,
+    emailjsServiceId: settings?.emailjsServiceId || '',
+    emailjsTemplateIdAdmin: settings?.emailjsTemplateIdAdmin || '',
+    emailjsTemplateIdCustomer: settings?.emailjsTemplateIdCustomer || '',
+    emailjsTemplateIdStatus: settings?.emailjsTemplateIdStatus || '',
+    emailjsPublicKey: settings?.emailjsPublicKey || '',
   });
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState('');
@@ -762,13 +803,23 @@ const SiteSettingsManager: React.FC<{ settings: SiteSettings | null; onRefresh: 
     const file = e.target.files?.[0];
     if (!file) return;
     setUploading(field);
-    try {
-      // Try Firebase Storage first
+    
+    const storagePromise = (async () => {
       const storageRef = ref(storage, `settings/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
+      return await getDownloadURL(storageRef);
+    })();
+    
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), 2000)
+    );
+
+    try {
+      // Try Firebase Storage with 2s timeout
+      const url = await Promise.race([storagePromise, timeoutPromise]);
       setForm(f => ({ ...f, [field]: url }));
       toast.success('Image uploaded to cloud storage!');
+      setUploading('');
     } catch {
       // Fallback: convert to base64 Data URL stored directly in settings doc
       try {
@@ -777,14 +828,17 @@ const SiteSettingsManager: React.FC<{ settings: SiteSettings | null; onRefresh: 
           const dataUrl = ev.target?.result as string;
           setForm(f => ({ ...f, [field]: dataUrl }));
           toast.success('Image loaded locally (base64)!');
+          setUploading('');
         };
-        reader.onerror = () => toast.error('Failed to read image file');
+        reader.onerror = () => {
+          toast.error('Failed to read image file');
+          setUploading('');
+        };
         reader.readAsDataURL(file);
       } catch {
         toast.error('Upload failed');
+        setUploading('');
       }
-    } finally {
-      setUploading('');
     }
   };
 
@@ -796,6 +850,11 @@ const SiteSettingsManager: React.FC<{ settings: SiteSettings | null; onRefresh: 
         specialOffer: { enabled: form.specialEnabled, title: form.specialTitle, description: form.specialDesc, imageUrl: form.specialImage, discount: form.specialDiscount },
         announcement: form.announcement,
         announcementEnabled: form.announcementEnabled,
+        emailjsServiceId: form.emailjsServiceId,
+        emailjsTemplateIdAdmin: form.emailjsTemplateIdAdmin,
+        emailjsTemplateIdCustomer: form.emailjsTemplateIdCustomer,
+        emailjsTemplateIdStatus: form.emailjsTemplateIdStatus,
+        emailjsPublicKey: form.emailjsPublicKey,
         updatedAt: serverTimestamp(),
       }, { merge: true });
       toast.success('Settings saved!');
@@ -896,6 +955,46 @@ const SiteSettingsManager: React.FC<{ settings: SiteSettings | null; onRefresh: 
               {form.specialImage && <img src={form.specialImage} alt="" className="w-24 h-16 rounded-xl object-cover" />}
             </div>
             <input ref={specialFileRef} type="file" accept="image/*" onChange={e => handleImageUpload(e, 'specialImage')} className="hidden" />
+          </div>
+        </div>
+      </div>
+
+      {/* EmailJS Settings */}
+      <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-6">
+        <h3 className="text-amber-400 font-semibold mb-2 flex items-center gap-2"><Mail size={16} /> EmailJS Notifications Settings</h3>
+        <p className="text-xs text-amber-200/50 mb-4">
+          Configure EmailJS integration to send email notifications when orders are placed or updated. Register at <a href="https://www.emailjs.com" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">emailjs.com</a> to retrieve these keys.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-amber-300 text-xs font-medium block mb-1">EmailJS Service ID</label>
+            <input type="text" value={form.emailjsServiceId} onChange={e => setForm(f => ({ ...f, emailjsServiceId: e.target.value }))}
+              className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+              placeholder="e.g. service_xxxxxxx" />
+          </div>
+          <div>
+            <label className="text-amber-300 text-xs font-medium block mb-1">EmailJS Public Key</label>
+            <input type="text" value={form.emailjsPublicKey} onChange={e => setForm(f => ({ ...f, emailjsPublicKey: e.target.value }))}
+              className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+              placeholder="e.g. user_xxxxxxxxxxxxxxxx" />
+          </div>
+          <div>
+            <label className="text-amber-300 text-xs font-medium block mb-1">Admin Order Notification Template ID</label>
+            <input type="text" value={form.emailjsTemplateIdAdmin} onChange={e => setForm(f => ({ ...f, emailjsTemplateIdAdmin: e.target.value }))}
+              className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+              placeholder="e.g. template_xxxxxxx" />
+          </div>
+          <div>
+            <label className="text-amber-300 text-xs font-medium block mb-1">Customer Order Confirmation Template ID</label>
+            <input type="text" value={form.emailjsTemplateIdCustomer} onChange={e => setForm(f => ({ ...f, emailjsTemplateIdCustomer: e.target.value }))}
+              className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+              placeholder="e.g. template_xxxxxxx" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-amber-300 text-xs font-medium block mb-1">Order Status Update Template ID</label>
+            <input type="text" value={form.emailjsTemplateIdStatus} onChange={e => setForm(f => ({ ...f, emailjsTemplateIdStatus: e.target.value }))}
+              className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+              placeholder="e.g. template_xxxxxxx" />
           </div>
         </div>
       </div>

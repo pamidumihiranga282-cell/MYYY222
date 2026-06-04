@@ -54,7 +54,7 @@ const HomePage: React.FC = () => {
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/30 text-amber-400 px-4 py-1.5 rounded-full text-sm font-medium mb-6">
-              <Zap size={14} /> Premium Dubai Collection 2025
+              <Zap size={14} /> Premium Dubai Collection {new Date().getFullYear()}
             </div>
             <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-white leading-tight mb-6">
               {hero.title.split(' ').map((word, i) => (

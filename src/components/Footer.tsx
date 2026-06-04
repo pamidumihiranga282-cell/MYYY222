@@ -92,7 +92,7 @@ const Footer: React.FC = () => {
         </div>
 
         <div className="border-t border-amber-900/30 mt-8 pt-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-amber-200/40">© 2025 MRM Shopping. All rights reserved.</p>
+          <p className="text-xs text-amber-200/40">© {new Date().getFullYear()} MRM Shopping. All rights reserved.</p>
           <p className="text-xs text-amber-200/40">Crafted with ❤️ for chocolate lovers in Sri Lanka</p>
         </div>
       </div>

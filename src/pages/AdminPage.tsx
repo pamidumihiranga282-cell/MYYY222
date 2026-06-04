@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc,
-  serverTimestamp, query, orderBy, setDoc, getDoc
+  serverTimestamp, query, orderBy, setDoc, getDoc, arrayUnion
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage, auth } from '../firebase';
@@ -175,6 +175,8 @@ const Dashboard: React.FC<{ stats: any; orders: Order[] }> = ({ stats, orders })
 };
 
 // Products Manager
+const DEFAULT_CATEGORIES = ['Dubai Bars', 'Gift Boxes', 'Truffles', 'Assorted'];
+
 const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> = ({ products, onRefresh }) => {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -187,12 +189,55 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
   const [saving, setSaving] = useState(false);
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [savedCategories, setSavedCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Derive unique categories from existing products
+  // Load saved categories from Firestore and seed defaults if needed
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'settings', 'categories'));
+        if (snap.exists()) {
+          const data = snap.data();
+          const list: string[] = data.list || [];
+          // Merge defaults with saved
+          const merged = Array.from(new Set([...DEFAULT_CATEGORIES, ...list])).sort();
+          setSavedCategories(merged);
+        } else {
+          // First time: seed the 4 default categories
+          await setDoc(doc(db, 'settings', 'categories'), { list: DEFAULT_CATEGORIES });
+          setSavedCategories(DEFAULT_CATEGORIES);
+        }
+      } catch (e) {
+        console.error('Failed to load categories', e);
+      }
+    };
+    loadCategories();
+  }, []);
+
+  // Merge Firestore-saved categories with product-derived categories
   const existingCategories = Array.from(
-    new Set(products.map(p => p.category).filter(Boolean))
+    new Set([
+      ...savedCategories,
+      ...products.map(p => p.category).filter(Boolean),
+    ])
   ).sort();
+
+  // Save a new category to Firestore
+  const saveNewCategory = async (cat: string) => {
+    try {
+      await updateDoc(doc(db, 'settings', 'categories'), { list: arrayUnion(cat) });
+      setSavedCategories(prev => Array.from(new Set([...prev, cat])).sort());
+    } catch {
+      // If doc doesn't exist yet, create it
+      try {
+        await setDoc(doc(db, 'settings', 'categories'), { list: [...savedCategories, cat] });
+        setSavedCategories(prev => Array.from(new Set([...prev, cat])).sort());
+      } catch (e2) {
+        console.error('Failed to save category', e2);
+      }
+    }
+  };
 
   const openAdd = () => {
     setEditing(null);
@@ -365,9 +410,12 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
                       value={newCategoryInput}
                       onChange={e => setNewCategoryInput(e.target.value)}
                       autoFocus
-                      onKeyDown={e => {
+                      onKeyDown={async e => {
                         if (e.key === 'Enter' && newCategoryInput.trim()) {
-                          setForm(f => ({ ...f, category: newCategoryInput.trim() }));
+                          const cat = newCategoryInput.trim();
+                          setForm(f => ({ ...f, category: cat }));
+                          await saveNewCategory(cat);
+                          toast.success(`Category "${cat}" saved!`);
                           setShowNewCategory(false);
                         }
                         if (e.key === 'Escape') { setShowNewCategory(false); }
@@ -377,9 +425,12 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
                     />
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         if (newCategoryInput.trim()) {
-                          setForm(f => ({ ...f, category: newCategoryInput.trim() }));
+                          const cat = newCategoryInput.trim();
+                          setForm(f => ({ ...f, category: cat }));
+                          await saveNewCategory(cat);
+                          toast.success(`Category "${cat}" saved!`);
                           setShowNewCategory(false);
                         }
                       }}
@@ -395,7 +446,7 @@ const ProductsManager: React.FC<{ products: Product[]; onRefresh: () => void }> 
                       <X size={14} />
                     </button>
                   </div>
-                  <p className="text-amber-200/40 text-xs">Press Enter or click Add to confirm the new category.</p>
+                  <p className="text-amber-200/40 text-xs">Press Enter or click Add to save and confirm the new category.</p>
                 </div>
               )}
             </div>

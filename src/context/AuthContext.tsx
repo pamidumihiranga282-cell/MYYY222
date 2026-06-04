@@ -1,65 +1,79 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
+  onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
-  onAuthStateChanged,
-  GoogleAuthProvider,
   signInWithPopup,
   sendPasswordResetEmail,
   updateProfile,
-  User as FirebaseUser,
+  User
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../firebase';
-import { User } from '../types';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, googleProvider } from '../lib/firebase';
+import { UserProfile } from '../types';
 
+interface AuthContextType {
+  user: User | null;
+  userProfile: UserProfile | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, name: string, phone: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
+  logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  isAdmin: boolean;
+  refreshProfile: () => Promise<void>;
+}
+
+const AuthContext = createContext<AuthContextType>({} as AuthContextType);
+
+export const useAuth = () => useContext(AuthContext);
 
 const ADMIN_EMAIL = 'mrmshopping2025@gmail.com';
 
-interface AuthContextType {
-  currentUser: FirebaseUser | null;
-  userData: User | null;
-  isAdmin: boolean;
-  loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
-  register: (email: string, password: string, name: string, phone: string) => Promise<void>;
-  logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
-
-export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
-};
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [userData, setUserData] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchUserData = async (uid: string) => {
+  const fetchProfile = async (u: User) => {
     try {
-      const userDoc = await getDoc(doc(db, 'users', uid));
-      if (userDoc.exists()) {
-        setUserData(userDoc.data() as User);
+      const docRef = doc(db, 'users', u.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const profile = { uid: u.uid, ...docSnap.data() } as UserProfile;
+        setUserProfile(profile);
+      } else {
+        const isAdmin = u.email === ADMIN_EMAIL;
+        const profile: UserProfile = {
+          uid: u.uid,
+          email: u.email || '',
+          displayName: u.displayName || '',
+          phone: '',
+          address: '',
+          isAdmin,
+          createdAt: Date.now()
+        };
+        await setDoc(docRef, profile);
+        setUserProfile(profile);
       }
-    } catch (e) {
-      console.error('Error fetching user data:', e);
+    } catch (err) {
+      console.error('Error fetching profile:', err);
     }
   };
 
+  const refreshProfile = async () => {
+    if (user) await fetchProfile(user);
+  };
+
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        await fetchUserData(user.uid);
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        await fetchProfile(u);
       } else {
-        setUserData(null);
+        setUserProfile(null);
       }
       setLoading(false);
     });
@@ -70,60 +84,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await signInWithEmailAndPassword(auth, email, password);
   };
 
-  const loginWithGoogle = async () => {
-    const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    const user = result.user;
-    const userRef = doc(db, 'users', user.uid);
-    const snap = await getDoc(userRef);
-    if (!snap.exists()) {
-      const role = user.email === ADMIN_EMAIL ? 'admin' : 'customer';
-      await setDoc(userRef, {
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName || '',
-        photoURL: user.photoURL || '',
-        phone: '',
-        address: '',
-        city: '',
-        role,
-        createdAt: serverTimestamp(),
-      });
-    }
-    await fetchUserData(user.uid);
-  };
-
   const register = async (email: string, password: string, name: string, phone: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName: name });
-    const role = email === ADMIN_EMAIL ? 'admin' : 'customer';
-    await setDoc(doc(db, 'users', cred.user.uid), {
+    const isAdmin = email === ADMIN_EMAIL;
+    const profile: UserProfile = {
       uid: cred.user.uid,
       email,
       displayName: name,
       phone,
       address: '',
-      city: '',
-      role,
-      createdAt: serverTimestamp(),
-    });
-    await fetchUserData(cred.user.uid);
+      isAdmin,
+      createdAt: Date.now()
+    };
+    await setDoc(doc(db, 'users', cred.user.uid), profile);
+    setUserProfile(profile);
+  };
+
+  const loginWithGoogle = async () => {
+    const result = await signInWithPopup(auth, googleProvider);
+    await fetchProfile(result.user);
   };
 
   const logout = async () => {
     await signOut(auth);
-    setUserData(null);
+    setUser(null);
+    setUserProfile(null);
   };
 
   const resetPassword = async (email: string) => {
     await sendPasswordResetEmail(auth, email);
   };
 
-  const isAdmin = userData?.role === 'admin' || currentUser?.email === ADMIN_EMAIL;
+  const isAdmin = userProfile?.isAdmin || user?.email === ADMIN_EMAIL;
 
   return (
-    <AuthContext.Provider value={{ currentUser, userData, isAdmin, loading, login, loginWithGoogle, register, logout, resetPassword }}>
-      {!loading && children}
+    <AuthContext.Provider value={{
+      user, userProfile, loading, login, register, loginWithGoogle, logout, resetPassword, isAdmin, refreshProfile
+    }}>
+      {children}
     </AuthContext.Provider>
   );
 };

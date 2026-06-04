@@ -1,213 +1,202 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import React, { useState } from 'react';
 import { Product } from '../types';
 import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
-import { ShoppingCart, Star, Truck, Shield, ArrowLeft, Plus, Minus, Package } from 'lucide-react';
+import {
+  ShoppingCart, ArrowLeft, MessageCircle, Zap, Package,
+  Weight, Tag, CheckCircle, XCircle, Star, Plus, Minus
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const ProductDetailPage: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const [product, setProduct] = useState<Product | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [quantity, setQuantity] = useState(1);
-  const [selectedImage, setSelectedImage] = useState(0);
+interface ProductDetailPageProps {
+  product: Product;
+  setCurrentPage: (page: string) => void;
+}
+
+const WHATSAPP_NUMBER = '94707070872';
+
+const ProductDetailPage: React.FC<ProductDetailPageProps> = ({ product, setCurrentPage }) => {
   const { addToCart } = useCart();
-  const { currentUser } = useAuth();
-  const navigate = useNavigate();
+  const [quantity, setQuantity] = useState(1);
+  const [imageError, setImageError] = useState(false);
 
-  useEffect(() => {
-    const fetch = async () => {
-      if (!id) return;
-      try {
-        const snap = await getDoc(doc(db, 'products', id));
-        if (snap.exists()) setProduct({ id: snap.id, ...snap.data() } as Product);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetch();
-  }, [id]);
-
-  const calcDelivery = (w: number) => {
-    if (w <= 0.25) return 150;
-    if (w <= 0.5) return 250;
-    if (w <= 0.75) return 350;
-    return 450;
-  };
+  const inStock = product.stock > 0;
 
   const handleAddToCart = () => {
-    if (!currentUser) {
-      toast.error('Please login to add items to cart');
-      navigate('/login');
-      return;
-    }
-    if (product) {
-      addToCart(product, quantity);
-    }
+    if (!inStock) return;
+    addToCart(product, quantity);
+    toast.success(`${product.name} added to cart!`, {
+      style: { background: '#3d1f14', color: '#f9edcf', borderRadius: '12px' },
+      iconTheme: { primary: '#d4912a', secondary: '#3d1f14' }
+    });
   };
 
   const handleBuyNow = () => {
-    if (!currentUser) {
-      toast.error('Please login to continue');
-      navigate('/login');
-      return;
-    }
-    if (product) {
-      addToCart(product, quantity);
-      navigate('/cart');
-    }
+    if (!inStock) return;
+    addToCart(product, quantity);
+    toast.success(`${product.name} added to cart!`, {
+      style: { background: '#3d1f14', color: '#f9edcf', borderRadius: '12px' },
+    });
+    setCurrentPage('cart');
   };
 
-  if (loading) return (
-    <div className="bg-[#0d0500] min-h-screen flex items-center justify-center">
-      <div className="animate-spin w-10 h-10 border-2 border-amber-500 border-t-transparent rounded-full" />
-    </div>
-  );
-
-  if (!product) return (
-    <div className="bg-[#0d0500] min-h-screen flex flex-col items-center justify-center text-white">
-      <p>Product not found</p>
-      <Link to="/products" className="text-amber-400 mt-4">← Back to Products</Link>
-    </div>
-  );
-
-  const images = [product.imageUrl, ...(product.images || [])].filter(Boolean);
-  const delivery = calcDelivery(product.weight * quantity);
+  const handleWhatsApp = () => {
+    const msg = encodeURIComponent(
+      `Hello MRM Shopping! 👋\n\n` +
+      `I'm interested in purchasing:\n` +
+      `🍫 *${product.name}*\n` +
+      `💰 Price: LKR ${product.price.toLocaleString()}\n` +
+      `⚖️ Weight: ${product.weight}g\n` +
+      `🔢 Quantity: ${quantity}\n\n` +
+      `Please let me know about availability and delivery. Thank you!`
+    );
+    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, '_blank');
+  };
 
   return (
-    <div className="bg-[#0d0500] min-h-screen py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <Link to="/products" className="inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 mb-8 transition-colors">
-          <ArrowLeft size={16} /> Back to Products
-        </Link>
+    <div className="min-h-screen bg-gradient-to-b from-dubai-cream to-gold-50 py-8">
+      <div className="max-w-5xl mx-auto px-4">
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-          {/* Images */}
-          <div>
-            <div className="aspect-square rounded-2xl overflow-hidden bg-amber-950 mb-4">
-              <img
-                src={images[selectedImage] || '/images/dubai-choc-1.jpg'}
-                alt={product.name}
-                className="w-full h-full object-cover"
-                onError={e => { (e.target as HTMLImageElement).src = '/images/dubai-choc-1.jpg'; }}
-              />
-            </div>
-            {images.length > 1 && (
-              <div className="flex gap-3">
-                {images.map((img, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedImage(i)}
-                    className={`w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors ${i === selectedImage ? 'border-amber-500' : 'border-transparent'}`}
-                  >
-                    <img src={img} alt="" className="w-full h-full object-cover" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* Back Button */}
+        <button
+          onClick={() => setCurrentPage('products')}
+          className="flex items-center gap-2 text-chocolate-600 hover:text-chocolate-900 mb-6 transition font-medium group"
+        >
+          <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
+          Back to Products
+        </button>
 
-          {/* Info */}
-          <div>
-            {product.isNew && (
-              <span className="inline-block bg-green-500/20 text-green-400 border border-green-500/30 text-xs px-3 py-1 rounded-full mb-3">New Arrival</span>
-            )}
-            <h1 className="text-3xl font-bold text-white mb-3">{product.name}</h1>
+        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gold-100">
+          <div className="grid md:grid-cols-2 gap-0">
 
-            <div className="flex items-center gap-2 mb-4">
-              <div className="flex">
-                {[...Array(5)].map((_, i) => (
-                  <Star key={i} size={16} className="text-amber-500 fill-amber-500" />
-                ))}
-              </div>
-              <span className="text-amber-200/50 text-sm">5.0 (Premium Quality)</span>
-            </div>
-
-            <div className="flex items-baseline gap-3 mb-6">
-              <span className="text-4xl font-bold text-amber-400">Rs. {product.price.toLocaleString()}</span>
-              {product.originalPrice && product.originalPrice > product.price && (
-                <span className="text-xl text-amber-200/40 line-through">Rs. {product.originalPrice.toLocaleString()}</span>
+            {/* Image Section */}
+            <div className="relative bg-gradient-to-br from-chocolate-50 to-gold-50 min-h-[360px] md:min-h-[500px] flex items-center justify-center overflow-hidden">
+              {!imageError && product.imageUrl ? (
+                <img
+                  src={product.imageUrl}
+                  alt={product.name}
+                  className="w-full h-full object-cover absolute inset-0"
+                  onError={() => setImageError(true)}
+                />
+              ) : (
+                <div className="text-8xl animate-pulse">🍫</div>
               )}
-              {product.discount && product.discount > 0 ? (
-                <span className="bg-red-500/20 text-red-400 text-sm px-2 py-0.5 rounded-full">{product.discount}% OFF</span>
-              ) : null}
+
+              {/* Badges */}
+              <div className="absolute top-4 left-4 flex flex-col gap-2">
+                {product.featured && (
+                  <span className="flex items-center gap-1 bg-gold-500 text-chocolate-900 text-sm font-bold px-3 py-1.5 rounded-full shadow-lg">
+                    <Star size={14} fill="currentColor" /> Featured
+                  </span>
+                )}
+                <span className={`flex items-center gap-1 text-sm font-bold px-3 py-1.5 rounded-full shadow-lg ${
+                  inStock ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+                }`}>
+                  {inStock ? <><CheckCircle size={14} /> In Stock</> : <><XCircle size={14} /> Out of Stock</>}
+                </span>
+              </div>
+
+              {/* Category badge */}
+              <div className="absolute top-4 right-4">
+                <span className="bg-chocolate-800/80 text-gold-300 text-xs font-medium px-3 py-1.5 rounded-full backdrop-blur-sm">
+                  {product.category}
+                </span>
+              </div>
             </div>
 
-            <p className="text-amber-200/60 leading-relaxed mb-6">{product.description}</p>
+            {/* Details Section */}
+            <div className="p-8 flex flex-col justify-between">
+              <div>
+                <h1 className="font-display text-3xl font-bold text-chocolate-900 mb-3 leading-tight">
+                  {product.name}
+                </h1>
 
-            {/* Details */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-amber-900/20 border border-amber-800/20 rounded-xl p-3">
-                <div className="text-amber-400 text-xs font-medium mb-1">Weight</div>
-                <div className="text-white font-semibold">{product.weight} kg</div>
-              </div>
-              <div className="bg-amber-900/20 border border-amber-800/20 rounded-xl p-3">
-                <div className="text-amber-400 text-xs font-medium mb-1">Category</div>
-                <div className="text-white font-semibold">{product.category || 'Chocolate'}</div>
-              </div>
-              <div className="bg-amber-900/20 border border-amber-800/20 rounded-xl p-3">
-                <div className="text-amber-400 text-xs font-medium mb-1">Stock</div>
-                <div className={`font-semibold ${product.stock > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {product.stock > 0 ? `${product.stock} available` : 'Out of Stock'}
+                <div className="flex items-center gap-4 mb-5 text-sm text-chocolate-500">
+                  <span className="flex items-center gap-1.5">
+                    <Weight size={15} className="text-gold-500" />
+                    {product.weight}g
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Tag size={15} className="text-gold-500" />
+                    {product.category}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Package size={15} className="text-gold-500" />
+                    {inStock ? 'Available' : 'Unavailable'}
+                  </span>
+                </div>
+
+                <p className="text-chocolate-600 text-base leading-relaxed mb-6">
+                  {product.description || 'Premium quality product brought directly from Dubai.'}
+                </p>
+
+                {/* Price */}
+                <div className="bg-gradient-to-r from-gold-50 to-amber-50 rounded-2xl p-5 mb-6 border border-gold-200">
+                  <p className="text-sm text-chocolate-500 mb-1">Price</p>
+                  <p className="text-4xl font-bold text-gold-600">
+                    LKR {product.price.toLocaleString()}
+                  </p>
+                  <p className="text-xs text-chocolate-400 mt-1">per {product.weight}g unit</p>
+                </div>
+
+                {/* Delivery Info */}
+                <div className="bg-blue-50 rounded-xl p-4 mb-6 border border-blue-100">
+                  <p className="text-sm font-semibold text-blue-700 mb-1">🚚 Delivery Charges</p>
+                  <div className="text-xs text-blue-600 space-y-0.5">
+                    <p>250g → Rs. 250 &nbsp;|&nbsp; 500g → Rs. 350 &nbsp;|&nbsp; 1kg → Rs. 450</p>
+                  </div>
+                </div>
+
+                {/* Quantity Selector */}
+                <div className="flex items-center gap-4 mb-6">
+                  <span className="text-sm font-medium text-chocolate-700">Quantity:</span>
+                  <div className="flex items-center gap-2 bg-gold-50 rounded-xl p-1 border border-gold-200">
+                    <button
+                      onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                      className="w-9 h-9 rounded-lg bg-white shadow flex items-center justify-center text-chocolate-700 hover:bg-gold-100 transition"
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="w-10 text-center font-bold text-chocolate-900 text-lg">{quantity}</span>
+                    <button
+                      onClick={() => setQuantity(q => q + 1)}
+                      className="w-9 h-9 rounded-lg bg-white shadow flex items-center justify-center text-chocolate-700 hover:bg-gold-100 transition"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                  <span className="text-sm text-chocolate-500">
+                    = LKR {(product.price * quantity).toLocaleString()}
+                  </span>
                 </div>
               </div>
-              <div className="bg-amber-900/20 border border-amber-800/20 rounded-xl p-3">
-                <div className="text-amber-400 text-xs font-medium mb-1">Delivery</div>
-                <div className="text-white font-semibold">Rs. {delivery}</div>
-              </div>
-            </div>
 
-            {/* Quantity */}
-            <div className="flex items-center gap-4 mb-6">
-              <span className="text-amber-200/60 text-sm">Quantity:</span>
-              <div className="flex items-center gap-3 bg-amber-900/20 border border-amber-800/30 rounded-xl px-3 py-2">
-                <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="text-amber-400 hover:text-white transition-colors">
-                  <Minus size={16} />
+              {/* Action Buttons */}
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={handleAddToCart}
+                    disabled={!inStock}
+                    className="flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-gold-500 to-gold-400 text-chocolate-900 rounded-xl font-bold hover:from-gold-400 hover:to-gold-300 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ShoppingCart size={18} />
+                    Add to Cart
+                  </button>
+                  <button
+                    onClick={handleBuyNow}
+                    disabled={!inStock}
+                    className="flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-chocolate-800 to-chocolate-700 text-gold-300 rounded-xl font-bold hover:from-chocolate-700 hover:to-chocolate-600 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Zap size={18} />
+                    Buy Now
+                  </button>
+                </div>
+                <button
+                  onClick={handleWhatsApp}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl font-bold hover:from-green-500 hover:to-green-400 transition shadow-lg"
+                >
+                  <MessageCircle size={18} />
+                  Enquire on WhatsApp
                 </button>
-                <span className="text-white font-semibold w-6 text-center">{quantity}</span>
-                <button onClick={() => setQuantity(q => q + 1)} className="text-amber-400 hover:text-white transition-colors">
-                  <Plus size={16} />
-                </button>
-              </div>
-              <span className="text-amber-200/40 text-sm">Total weight: {(product.weight * quantity).toFixed(2)}kg</span>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-3 mb-8">
-              <button
-                onClick={handleAddToCart}
-                disabled={product.stock <= 0}
-                className="flex-1 flex items-center justify-center gap-2 bg-amber-500/20 border border-amber-500/50 text-amber-400 hover:bg-amber-500/30 px-6 py-4 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ShoppingCart size={18} /> Add to Cart
-              </button>
-              <button
-                onClick={handleBuyNow}
-                disabled={product.stock <= 0}
-                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Buy Now
-              </button>
-            </div>
-
-            {/* Trust badges */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="flex flex-col items-center text-center p-3 bg-amber-900/10 rounded-xl">
-                <Truck size={20} className="text-amber-500 mb-1" />
-                <span className="text-xs text-amber-200/50">Fast Delivery</span>
-              </div>
-              <div className="flex flex-col items-center text-center p-3 bg-amber-900/10 rounded-xl">
-                <Shield size={20} className="text-amber-500 mb-1" />
-                <span className="text-xs text-amber-200/50">100% Authentic</span>
-              </div>
-              <div className="flex flex-col items-center text-center p-3 bg-amber-900/10 rounded-xl">
-                <Package size={20} className="text-amber-500 mb-1" />
-                <span className="text-xs text-amber-200/50">Safe Packaging</span>
               </div>
             </div>
           </div>

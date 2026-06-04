@@ -1,279 +1,255 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { collection, query, where, getDocs, orderBy, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Order, OrderStatus } from '../types';
-import { User, Package, MapPin, Phone, Mail, ChevronRight, Clock, CheckCircle, Truck, XCircle, Edit3, Save } from 'lucide-react';
+import { doc, updateDoc, collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { Order } from '../types';
+import { User, Mail, Phone, MapPin, Save, Package, Clock, Truck, CheckCircle, XCircle, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { getWhatsAppMessage, openWhatsAppPopup } from '../utils/whatsapp';
 
-const statusConfig: Record<OrderStatus, { label: string; color: string; bg: string; icon: React.ReactNode }> = {
-  pending: { label: 'Pending', color: 'text-yellow-400', bg: 'bg-yellow-500/20 border-yellow-500/30', icon: <Clock size={12} /> },
-  confirmed: { label: 'Confirmed', color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500/30', icon: <CheckCircle size={12} /> },
-  processing: { label: 'Processing', color: 'text-purple-400', bg: 'bg-purple-500/20 border-purple-500/30', icon: <Package size={12} /> },
-  shipped: { label: 'Shipped', color: 'text-amber-400', bg: 'bg-amber-500/20 border-amber-500/30', icon: <Truck size={12} /> },
-  out_for_delivery: { label: 'Out for Delivery', color: 'text-orange-400', bg: 'bg-orange-500/20 border-orange-500/30', icon: <Truck size={12} /> },
-  delivered: { label: 'Delivered', color: 'text-green-400', bg: 'bg-green-500/20 border-green-500/30', icon: <CheckCircle size={12} /> },
-  cancelled: { label: 'Cancelled', color: 'text-red-400', bg: 'bg-red-500/20 border-red-500/30', icon: <XCircle size={12} /> },
-};
+interface AccountPageProps {
+  setCurrentPage: (page: string) => void;
+  defaultTab?: 'profile' | 'orders';
+}
 
-const AccountPage: React.FC = () => {
-  const { currentUser, userData } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+const AccountPage: React.FC<AccountPageProps> = ({ setCurrentPage, defaultTab = 'profile' }) => {
+  const { user, userProfile, refreshProfile } = useAuth();
+  const [name, setName] = useState(userProfile?.displayName || '');
+  const [phone, setPhone] = useState(userProfile?.phone || '');
+  const [address, setAddress] = useState(userProfile?.address || '');
+  const [saving, setSaving] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [loadingOrders, setLoadingOrders] = useState(false);
-  const [activeSection, setActiveSection] = useState(location.pathname.includes('orders') ? 'orders' : 'profile');
-  const [editingProfile, setEditingProfile] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    displayName: userData?.displayName || '',
-    phone: userData?.phone || '',
-    address: userData?.address || '',
-    city: userData?.city || '',
-  });
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [activeTab, setActiveTab] = useState<'profile' | 'orders'>(defaultTab);
 
   useEffect(() => {
-    if (!currentUser) { navigate('/login'); return; }
-    if (activeSection === 'orders') fetchOrders();
-  }, [currentUser, activeSection]);
-
-  useEffect(() => {
-    setProfileForm({
-      displayName: userData?.displayName || '',
-      phone: userData?.phone || '',
-      address: userData?.address || '',
-      city: userData?.city || '',
-    });
-  }, [userData]);
-
-  const fetchOrders = async () => {
-    if (!currentUser) return;
-    setLoadingOrders(true);
-    try {
-      const q = query(collection(db, 'orders'), where('userId', '==', currentUser.uid), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
-      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingOrders(false);
+    if (userProfile) {
+      setName(userProfile.displayName || '');
+      setPhone(userProfile.phone || '');
+      setAddress(userProfile.address || '');
     }
-  };
+  }, [userProfile]);
 
-  const handleSaveProfile = async () => {
-    if (!currentUser) return;
+  useEffect(() => {
+    const fetchOrders = async () => {
+      if (!user) return;
+      try {
+        const q = query(collection(db, 'orders'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+        const snap = await getDocs(q);
+        setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() }) as Order));
+      } catch (err) {
+        console.error('Error:', err);
+      } finally {
+        setLoadingOrders(false);
+      }
+    };
+    fetchOrders();
+  }, [user]);
+
+  const handleSave = async () => {
+    if (!user) return;
+    setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', currentUser.uid), profileForm);
-      toast.success('Profile updated successfully!');
-      setEditingProfile(false);
-    } catch (e) {
+      await updateDoc(doc(db, 'users', user.uid), {
+        displayName: name,
+        phone,
+        address
+      });
+      await refreshProfile();
+      toast.success('Profile updated! ✅');
+    } catch (err) {
       toast.error('Failed to update profile');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const nav = [
-    { id: 'profile', label: 'My Profile', icon: <User size={16} /> },
-    { id: 'orders', label: 'My Orders', icon: <Package size={16} /> },
-  ];
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-dubai-cream to-gold-50 flex items-center justify-center">
+        <div className="text-center">
+          <User size={60} className="text-gold-300 mx-auto mb-4" />
+          <h2 className="font-display text-2xl font-bold text-chocolate-900 mb-3">Please Log In</h2>
+          <button onClick={() => setCurrentPage('login')} className="px-6 py-3 bg-gold-500 text-chocolate-900 rounded-xl font-bold">
+            Go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-  if (!currentUser) return null;
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'bg-yellow-100 text-yellow-700';
+      case 'confirmed': return 'bg-blue-100 text-blue-700';
+      case 'processing': return 'bg-purple-100 text-purple-700';
+      case 'shipped': return 'bg-indigo-100 text-indigo-700';
+      case 'delivered': return 'bg-green-100 text-green-700';
+      case 'cancelled': return 'bg-red-100 text-red-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pending': return <Clock size={14} />;
+      case 'shipped': return <Truck size={14} />;
+      case 'delivered': return <CheckCircle size={14} />;
+      case 'cancelled': return <XCircle size={14} />;
+      default: return <Package size={14} />;
+    }
+  };
 
   return (
-    <div className="bg-[#0d0500] min-h-screen py-8">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-bold text-white mb-8">My Account</h1>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-4">
-              <div className="flex items-center gap-3 p-3 mb-4 border-b border-amber-900/20">
-                <div className="w-12 h-12 rounded-full bg-amber-600 flex items-center justify-center text-white text-xl font-bold">
-                  {userData?.displayName?.[0]?.toUpperCase() || 'U'}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-white font-semibold text-sm truncate">{userData?.displayName}</div>
-                  <div className="text-amber-200/40 text-xs truncate">{currentUser.email}</div>
-                </div>
-              </div>
-              <nav className="space-y-1">
-                {nav.map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => { setActiveSection(item.id); setSelectedOrder(null); }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${activeSection === item.id ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-amber-200/60 hover:bg-amber-900/20 hover:text-amber-300'}`}
-                  >
-                    {item.icon} {item.label}
-                  </button>
-                ))}
-              </nav>
+    <div className="min-h-screen bg-gradient-to-b from-dubai-cream to-gold-50 py-8">
+      <div className="max-w-4xl mx-auto px-4">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-chocolate-900 to-chocolate-800 rounded-2xl p-8 mb-8 text-white">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-gold-500 flex items-center justify-center text-chocolate-900 text-2xl font-bold">
+              {userProfile?.displayName?.charAt(0)?.toUpperCase() || 'U'}
+            </div>
+            <div>
+              <h1 className="font-display text-2xl font-bold">{userProfile?.displayName || 'User'}</h1>
+              <p className="text-chocolate-300">{user.email}</p>
             </div>
           </div>
+        </div>
 
-          {/* Content */}
-          <div className="lg:col-span-3">
-            {activeSection === 'profile' && (
-              <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-white font-semibold text-lg">Profile Information</h2>
-                  <button
-                    onClick={() => editingProfile ? handleSaveProfile() : setEditingProfile(true)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors ${editingProfile ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-amber-900/30 text-amber-400 hover:bg-amber-900/50'}`}
-                  >
-                    {editingProfile ? <><Save size={14} /> Save</> : <><Edit3 size={14} /> Edit</>}
-                  </button>
-                </div>
+        {/* Tabs */}
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition ${
+              activeTab === 'profile' ? 'bg-gold-500 text-chocolate-900 shadow-lg' : 'bg-white text-chocolate-600 hover:bg-gold-50'
+            }`}
+          >
+            <User size={18} /> Profile
+          </button>
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`flex items-center gap-2 px-6 py-3 rounded-xl font-semibold transition ${
+              activeTab === 'orders' ? 'bg-gold-500 text-chocolate-900 shadow-lg' : 'bg-white text-chocolate-600 hover:bg-gold-50'
+            }`}
+          >
+            <Package size={18} /> My Orders ({orders.length})
+          </button>
+        </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {[
-                    { label: 'Full Name', key: 'displayName', icon: <User size={14} />, type: 'text' },
-                    { label: 'Phone Number', key: 'phone', icon: <Phone size={14} />, type: 'tel' },
-                    { label: 'Address', key: 'address', icon: <MapPin size={14} />, type: 'text' },
-                    { label: 'City', key: 'city', icon: <MapPin size={14} />, type: 'text' },
-                  ].map(field => (
-                    <div key={field.key}>
-                      <label className="text-amber-300 text-xs font-medium block mb-1 flex items-center gap-1">
-                        {field.icon} {field.label}
-                      </label>
-                      {editingProfile ? (
-                        <input
-                          type={field.type}
-                          value={(profileForm as any)[field.key]}
-                          onChange={e => setProfileForm(f => ({ ...f, [field.key]: e.target.value }))}
-                          className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
-                        />
-                      ) : (
-                        <div className="text-amber-200/70 text-sm py-2.5 px-4 bg-amber-900/10 rounded-xl border border-amber-900/20">
-                          {(profileForm as any)[field.key] || <span className="text-amber-200/30 italic">Not set</span>}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <div className="md:col-span-2">
-                    <label className="text-amber-300 text-xs font-medium block mb-1 flex items-center gap-1">
-                      <Mail size={14} /> Email Address
-                    </label>
-                    <div className="text-amber-200/70 text-sm py-2.5 px-4 bg-amber-900/10 rounded-xl border border-amber-900/20">
-                      {currentUser.email}
-                    </div>
-                  </div>
+        {/* Profile Tab */}
+        {activeTab === 'profile' && (
+          <div className="bg-white rounded-2xl p-8 shadow-xl border border-gold-100 animate-fadeIn">
+            <h2 className="font-display text-xl font-bold text-chocolate-900 mb-6">Edit Profile</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-chocolate-700 mb-1 block">Full Name</label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 text-chocolate-400" size={18} />
+                  <input type="text" value={name} onChange={e => setName(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-gold-50 rounded-xl border border-gold-200 focus:border-gold-500 outline-none text-chocolate-800" />
                 </div>
               </div>
-            )}
-
-            {activeSection === 'orders' && !selectedOrder && (
-              <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-6">
-                <h2 className="text-white font-semibold text-lg mb-6">My Orders</h2>
-                {loadingOrders ? (
-                  <div className="space-y-3">
-                    {[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-amber-900/20 rounded-xl animate-pulse" />)}
-                  </div>
-                ) : orders.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Package size={48} className="text-amber-900 mx-auto mb-3" />
-                    <p className="text-amber-200/50 mb-4">No orders yet</p>
-                    <Link to="/products" className="bg-amber-500 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-amber-600 transition-colors text-sm">
-                      Start Shopping
-                    </Link>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {orders.map(order => {
-                      const cfg = statusConfig[order.status];
-                      return (
-                        <div key={order.id} className="border border-amber-900/20 rounded-xl p-4 hover:border-amber-700/40 transition-colors cursor-pointer" onClick={() => setSelectedOrder(order)}>
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-white font-mono font-medium text-sm">{order.trackingNumber}</span>
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${cfg.bg} ${cfg.color}`}>
-                                  {cfg.icon} {cfg.label}
-                                </span>
-                              </div>
-                              <div className="text-amber-200/40 text-xs mt-1">
-                                {order.items.length} item(s) · Rs. {order.total.toLocaleString()}
-                              </div>
-                              <div className="text-amber-200/30 text-xs">
-                                {order.createdAt?.toDate?.()?.toLocaleDateString?.() || new Date(order.createdAt?.seconds * 1000).toLocaleDateString()}
-                              </div>
-                            </div>
-                            <ChevronRight size={16} className="text-amber-600 flex-shrink-0 mt-1" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeSection === 'orders' && selectedOrder && (
-              <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-6">
-                <button onClick={() => setSelectedOrder(null)} className="text-amber-400 hover:text-amber-300 text-sm mb-4 flex items-center gap-1 transition-colors">
-                  ← Back to Orders
-                </button>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-white font-semibold">Order #{selectedOrder.trackingNumber}</h2>
-                  <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs border ${statusConfig[selectedOrder.status].bg} ${statusConfig[selectedOrder.status].color}`}>
-                    {statusConfig[selectedOrder.status].icon} {statusConfig[selectedOrder.status].label}
-                  </span>
+              <div>
+                <label className="text-sm font-medium text-chocolate-700 mb-1 block">Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-chocolate-400" size={18} />
+                  <input type="email" value={user.email || ''} disabled
+                    className="w-full pl-10 pr-4 py-3 bg-gray-100 rounded-xl border border-gray-200 text-gray-500 cursor-not-allowed" />
                 </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-chocolate-700 mb-1 block">Phone Number</label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-chocolate-400" size={18} />
+                  <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-gold-50 rounded-xl border border-gold-200 focus:border-gold-500 outline-none text-chocolate-800" />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-chocolate-700 mb-1 block">Address</label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-3 text-chocolate-400" size={18} />
+                  <textarea value={address} onChange={e => setAddress(e.target.value)} rows={3}
+                    className="w-full pl-10 pr-4 py-3 bg-gold-50 rounded-xl border border-gold-200 focus:border-gold-500 outline-none text-chocolate-800 resize-none" />
+                </div>
+              </div>
+              <button onClick={handleSave} disabled={saving}
+                className="flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-gold-500 to-gold-400 text-chocolate-900 rounded-xl font-bold hover:from-gold-400 hover:to-gold-300 transition shadow-lg disabled:opacity-50">
+                <Save size={18} /> {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        )}
 
-                {/* Items */}
-                <div className="space-y-3 mb-6">
-                  {selectedOrder.items.map((item, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 bg-amber-900/10 rounded-xl">
-                      <img src={item.productImage} alt={item.productName} className="w-12 h-12 rounded-lg object-cover bg-amber-950" onError={e => { (e.target as HTMLImageElement).src = '/images/dubai-choc-1.jpg'; }} />
-                      <div className="flex-1">
-                        <div className="text-white text-sm font-medium">{item.productName}</div>
-                        <div className="text-amber-200/40 text-xs">Qty: {item.quantity} × Rs. {item.price.toLocaleString()}</div>
+        {/* Orders Tab */}
+        {activeTab === 'orders' && (
+          <div className="space-y-4 animate-fadeIn">
+            {loadingOrders ? (
+              <div className="flex justify-center py-12">
+                <div className="w-12 h-12 border-4 border-gold-300 border-t-gold-600 rounded-full animate-spin"></div>
+              </div>
+            ) : orders.length > 0 ? (
+              orders.map(order => (
+                <div key={order.id} className="bg-white rounded-2xl shadow-lg border border-gold-100 overflow-hidden">
+                  <div className="p-5">
+                    <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+                      <div>
+                        <p className="text-sm text-chocolate-400">Tracking Number</p>
+                        <p className="font-mono font-bold text-chocolate-900">{order.trackingNumber}</p>
                       </div>
-                      <div className="text-amber-400 font-semibold text-sm">Rs. {(item.price * item.quantity).toLocaleString()}</div>
+                      <span className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${getStatusColor(order.status)}`}>
+                        {getStatusIcon(order.status)} {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                      </span>
                     </div>
-                  ))}
-                </div>
 
-                {/* Totals */}
-                <div className="border-t border-amber-900/30 pt-4 mb-6 space-y-2 text-sm">
-                  <div className="flex justify-between text-amber-200/50"><span>Subtotal</span><span>Rs. {selectedOrder.subtotal.toLocaleString()}</span></div>
-                  <div className="flex justify-between text-amber-200/50"><span>Delivery</span><span>Rs. {selectedOrder.deliveryCharge}</span></div>
-                  <div className="flex justify-between text-white font-bold text-base"><span>Total</span><span className="text-amber-400">Rs. {selectedOrder.total.toLocaleString()}</span></div>
-                </div>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {order.items.map((item, i) => (
+                        <div key={i} className="flex items-center gap-2 bg-gold-50 rounded-lg p-2 pr-3">
+                          <img src={item.product.imageUrl || '/images/dubai-chocolate-1.jpg'} alt="" className="w-8 h-8 rounded object-cover" />
+                          <span className="text-xs text-chocolate-700">{item.product.name} x{item.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
 
-                {/* WhatsApp resend */}
-                <div className="mb-6">
-                  <a
-                    href={openWhatsAppPopup(
-                      selectedOrder.userPhone.startsWith('0') ? '94' + selectedOrder.userPhone.slice(1) : selectedOrder.userPhone,
-                      getWhatsAppMessage(selectedOrder)
-                    )}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 bg-green-600/20 border border-green-600/30 text-green-400 px-4 py-2.5 rounded-xl text-sm hover:bg-green-600/30 transition-colors"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-4 h-4 fill-green-400">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                    </svg>
-                    Resend WhatsApp Notification
-                  </a>
-                </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-chocolate-400">{new Date(order.createdAt).toLocaleDateString()}</span>
+                      <span className="font-bold text-gold-600 text-lg">LKR {order.total.toLocaleString()}</span>
+                    </div>
+                  </div>
 
-                {/* Address */}
-                <div className="bg-amber-900/10 rounded-xl p-4 text-sm">
-                  <div className="text-amber-400 font-medium mb-2 flex items-center gap-1"><MapPin size={12} /> Delivery Address</div>
-                  <div className="text-amber-200/60">
-                    <div>{selectedOrder.shippingAddress.fullName}</div>
-                    <div>{selectedOrder.shippingAddress.addressLine1}</div>
-                    {selectedOrder.shippingAddress.addressLine2 && <div>{selectedOrder.shippingAddress.addressLine2}</div>}
-                    <div>{selectedOrder.shippingAddress.city}, {selectedOrder.shippingAddress.district}</div>
+                  {/* Actions */}
+                  <div className="bg-gold-50 px-5 py-3 border-t border-gold-100 flex items-center justify-between flex-wrap gap-2">
+                    <button
+                      onClick={() => setCurrentPage('tracking')}
+                      className="flex items-center gap-1.5 text-xs bg-gold-500 text-chocolate-900 font-bold px-3 py-1.5 rounded-lg hover:bg-gold-400 transition"
+                    >
+                      <Search size={12} /> Track Order
+                    </button>
+                    <button
+                      onClick={() => {
+                        const msg = encodeURIComponent(
+                          `Hi MRM Shopping! I'd like to check on my order ${order.trackingNumber}. Status: ${order.status}. Thank you!`
+                        );
+                        window.open(`https://wa.me/94707070872?text=${msg}`, '_blank');
+                      }}
+                      className="text-xs text-green-600 font-semibold hover:underline flex items-center gap-1"
+                    >
+                      📱 WhatsApp Follow-up →
+                    </button>
                   </div>
                 </div>
+              ))
+            ) : (
+              <div className="bg-white rounded-2xl p-12 shadow-xl text-center">
+                <Package size={60} className="text-gold-300 mx-auto mb-4" />
+                <h3 className="font-display text-xl font-bold text-chocolate-900 mb-2">No Orders Yet</h3>
+                <p className="text-chocolate-500 mb-4">Start shopping to see your orders here!</p>
+                <button onClick={() => setCurrentPage('products')} className="px-6 py-3 bg-gold-500 text-chocolate-900 rounded-xl font-bold">
+                  Browse Products
+                </button>
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

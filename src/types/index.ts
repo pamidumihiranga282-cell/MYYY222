@@ -1,110 +1,54 @@
-export interface User {
-  uid: string;
-  email: string;
-  displayName: string;
-  phone?: string;
-  address?: string;
-  city?: string;
-  role: 'admin' | 'customer';
-  createdAt: any;
-  photoURL?: string;
-}
-
 export interface Product {
   id: string;
   name: string;
   description: string;
   price: number;
-  originalPrice?: number;
+  weight: number; // in grams
   category: string;
   imageUrl: string;
-  images?: string[];
   stock: number;
-  weight: number; // in kg
   featured: boolean;
-  isNew?: boolean;
-  discount?: number;
-  createdAt: any;
-  updatedAt?: any;
+  createdAt: number;
 }
 
 export interface CartItem {
-  productId: string;
   product: Product;
   quantity: number;
 }
 
 export interface Order {
   id: string;
-  trackingNumber: string;
   userId: string;
   userEmail: string;
   userName: string;
   userPhone: string;
-  items: OrderItem[];
+  items: CartItem[];
   subtotal: number;
   deliveryCharge: number;
+  totalWeight: number;
   total: number;
-  status: OrderStatus;
-  shippingAddress: ShippingAddress;
-  paymentMethod: string;
-  notes?: string;
-  createdAt: any;
-  updatedAt?: any;
-  statusHistory: StatusUpdate[];
+  shippingAddress: string;
+  status: 'pending' | 'confirmed' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  trackingNumber: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
-export interface OrderItem {
-  productId: string;
-  productName: string;
-  productImage: string;
-  price: number;
-  quantity: number;
-  weight: number;
-}
-
-export interface StatusUpdate {
-  status: OrderStatus;
-  note?: string;
-  timestamp: any;
-}
-
-export type OrderStatus =
-  | 'pending'
-  | 'confirmed'
-  | 'processing'
-  | 'shipped'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'cancelled';
-
-export interface ShippingAddress {
-  fullName: string;
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
   phone: string;
-  addressLine1: string;
-  addressLine2?: string;
-  city: string;
-  district: string;
-  postalCode?: string;
+  address: string;
+  isAdmin: boolean;
+  createdAt: number;
 }
 
 export interface SiteSettings {
-  id: string;
-  heroBanner: {
-    title: string;
-    subtitle: string;
-    imageUrl: string;
-    ctaText: string;
-  };
-  specialOffer?: {
-    enabled: boolean;
-    title: string;
-    description: string;
-    imageUrl?: string;
-    discount?: number;
-  };
-  announcement?: string;
-  announcementEnabled: boolean;
-  aboutUs?: string;
-  updatedAt?: any;
+  heroTitle: string;
+  heroSubtitle: string;
+  specialBanner: string;
+  showSpecialBanner: boolean;
+  heroImageUrl: string;
+  aboutText: string;
 }

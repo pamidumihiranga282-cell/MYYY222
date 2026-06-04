@@ -1,328 +1,333 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { ShoppingCart, Trash2, Plus, Minus, ArrowRight, Package, Truck } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../firebase';
-import { Order, ShippingAddress, OrderItem } from '../types';
-import { getWhatsAppMessage, openWhatsAppPopup } from '../utils/whatsapp';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { Order } from '../types';
+import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, Package, CheckCircle, Copy, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const CartPage: React.FC = () => {
-  const { items, removeFromCart, updateQuantity, clearCart, subtotal, deliveryCharge, total, totalWeight } = useCart();
-  const { currentUser, userData } = useAuth();
-  const navigate = useNavigate();
-  const [checkout, setCheckout] = useState(false);
-  const [placing, setPlacing] = useState(false);
-  const [whatsappPopup, setWhatsappPopup] = useState<{ url: string; message: string } | null>(null);
-  const [form, setForm] = useState<ShippingAddress>({
-    fullName: userData?.displayName || '',
-    phone: userData?.phone || '',
-    addressLine1: '',
-    addressLine2: '',
-    city: '',
-    district: '',
-    postalCode: '',
-  });
-  const [paymentMethod, setPaymentMethod] = useState('cod');
-  const [notes, setNotes] = useState('');
+interface CartPageProps {
+  setCurrentPage: (page: string) => void;
+}
 
-  const generateTracking = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    return 'MRM' + Array.from({ length: 7 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+const WHATSAPP_NUMBER = '94707070872';
+
+// Bank details
+const BANK_INFO = {
+  name: 'RR Hasan',
+  account: '8015204918',
+  bank: 'Commercial Bank',
+  branch: 'Vavuniya',
+};
+
+const CartPage: React.FC<CartPageProps> = ({ setCurrentPage }) => {
+  const { cart, removeFromCart, updateQuantity, clearCart, getSubtotal, getDeliveryCharge, getTotal, getTotalWeight } = useCart();
+  const { user, userProfile } = useAuth();
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [address, setAddress] = useState(userProfile?.address || '');
+  const [phone, setPhone] = useState(userProfile?.phone || '');
+  const [placing, setPlacing] = useState(false);
+  const [placedTracking, setPlacedTracking] = useState<string | null>(null);
+
+  const copyTracking = (num: string) => {
+    navigator.clipboard.writeText(num);
+    toast.success('Tracking number copied!');
   };
 
   const handlePlaceOrder = async () => {
-    if (!currentUser) { navigate('/login'); return; }
-    if (!form.fullName || !form.phone || !form.addressLine1 || !form.city || !form.district) {
-      return toast.error('Please fill all required fields');
+    if (!user || !userProfile) {
+      toast.error('Please login to place an order');
+      setCurrentPage('login');
+      return;
     }
+    if (!address.trim() || !phone.trim()) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
     setPlacing(true);
     try {
-      const trackingNumber = generateTracking();
-      const orderItems: OrderItem[] = items.map(i => ({
-        productId: i.productId,
-        productName: i.product.name,
-        productImage: i.product.imageUrl,
-        price: i.product.price,
-        quantity: i.quantity,
-        weight: i.product.weight,
-      }));
+      const trackingNumber = 'MRM' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
-      const orderData = {
-        trackingNumber,
-        userId: currentUser.uid,
-        userEmail: currentUser.email || '',
-        userName: form.fullName,
-        userPhone: form.phone,
-        items: orderItems,
-        subtotal,
-        deliveryCharge,
-        total,
+      const orderData: Omit<Order, 'id'> = {
+        userId: user.uid,
+        userEmail: user.email || '',
+        userName: userProfile.displayName || '',
+        userPhone: phone,
+        items: cart,
+        subtotal: getSubtotal(),
+        deliveryCharge: getDeliveryCharge(),
+        totalWeight: getTotalWeight(),
+        total: getTotal(),
+        shippingAddress: address,
         status: 'pending',
-        shippingAddress: form,
-        paymentMethod,
-        notes,
-        createdAt: serverTimestamp(),
-        statusHistory: [{ status: 'pending', note: 'Order placed', timestamp: new Date().toISOString() }],
+        trackingNumber,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       };
 
-      const docRef = await addDoc(collection(db, 'orders'), orderData);
-      const order = { id: docRef.id, ...orderData } as unknown as Order;
+      await addDoc(collection(db, 'orders'), orderData);
 
-      // WhatsApp notification
-      const msg = getWhatsAppMessage(order);
-      const phone = form.phone.startsWith('0') ? '94' + form.phone.slice(1) : form.phone;
-      const waUrl = openWhatsAppPopup(phone, msg);
-      setWhatsappPopup({ url: waUrl, message: msg });
+      // WhatsApp notification to shop
+      const itemsList = cart.map(item => `${item.product.name} x${item.quantity}`).join(', ');
+      const waMessage = encodeURIComponent(
+        `🛍 *New Order from MRM Shopping!*\n\n` +
+        `👤 Customer: ${userProfile.displayName}\n` +
+        `📧 Email: ${user.email}\n` +
+        `📱 Phone: ${phone}\n` +
+        `📦 Items: ${itemsList}\n` +
+        `💰 Total: LKR ${getTotal().toLocaleString()}\n` +
+        `📍 Address: ${address}\n` +
+        `🔢 Tracking: ${trackingNumber}\n\n` +
+        `Thank you for your order! We'll process it shortly. ✅`
+      );
+
+      window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${waMessage}`, '_blank');
 
       clearCart();
-      toast.success('🎉 Order placed successfully!');
-    } catch (e) {
-      console.error(e);
+      setPlacedTracking(trackingNumber);
+      setShowCheckout(false);
+    } catch (err) {
+      console.error('Error placing order:', err);
       toast.error('Failed to place order. Please try again.');
     } finally {
       setPlacing(false);
     }
   };
 
-  if (whatsappPopup) {
+  // Show success screen after order placed
+  if (placedTracking) {
     return (
-      <div className="bg-[#0d0500] min-h-screen flex items-center justify-center px-4">
-        <div className="max-w-lg w-full bg-[#1a0800] border border-amber-900/30 rounded-2xl p-8 text-center">
-          <div className="text-6xl mb-4">🎉</div>
-          <h2 className="text-2xl font-bold text-white mb-2">Order Placed!</h2>
-          <p className="text-amber-200/60 mb-6">Your order has been placed successfully. You'll receive updates about your order.</p>
-
-          <div className="bg-amber-900/20 border border-amber-800/20 rounded-xl p-4 mb-6 text-left">
-            <h3 className="text-amber-400 font-semibold mb-2">📱 WhatsApp Notification</h3>
-            <div className="bg-green-900/20 border border-green-700/30 rounded-lg p-3 text-sm text-green-300 whitespace-pre-line font-mono">
-              {whatsappPopup.message.slice(0, 300)}...
+      <div className="min-h-screen bg-gradient-to-b from-dubai-cream to-gold-50 flex items-center justify-center py-12">
+        <div className="max-w-lg w-full mx-4">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gold-100">
+            <div className="bg-gradient-to-r from-green-600 to-green-500 p-8 text-center text-white">
+              <CheckCircle size={64} className="mx-auto mb-4" />
+              <h2 className="font-display text-3xl font-bold mb-2">Order Placed! 🎉</h2>
+              <p className="text-green-100">Thank you for shopping with MRM Shopping</p>
             </div>
-          </div>
+            <div className="p-8">
+              {/* Tracking number */}
+              <div className="bg-gold-50 rounded-2xl p-5 mb-6 border border-gold-200 text-center">
+                <p className="text-sm text-chocolate-500 mb-2 font-medium">Your Tracking Number</p>
+                <p className="font-mono text-2xl font-bold text-chocolate-900 mb-3">{placedTracking}</p>
+                <button
+                  onClick={() => copyTracking(placedTracking)}
+                  className="flex items-center gap-2 mx-auto text-sm text-gold-600 hover:text-gold-700 font-medium"
+                >
+                  <Copy size={14} /> Copy Number
+                </button>
+              </div>
 
-          <div className="flex flex-col gap-3">
-            <a
-              href={whatsappPopup.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-semibold transition-colors"
-            >
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-              </svg>
-              Send WhatsApp Notification
-            </a>
-            <button
-              onClick={() => navigate('/account/orders')}
-              className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-xl font-semibold transition-colors"
-            >
-              View My Orders
-            </button>
-            <Link to="/tracking" className="text-amber-400 hover:text-amber-300 transition-colors text-sm">
-              Track Your Order
-            </Link>
+              {/* Bank Details */}
+              <div className="bg-blue-50 rounded-2xl p-5 mb-6 border border-blue-100">
+                <p className="text-sm font-bold text-blue-700 mb-3">🏦 Payment Instructions</p>
+                <p className="text-xs text-blue-600 mb-3">Please transfer the amount to the bank account below and send the receipt via WhatsApp.</p>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-blue-500">Account Name</span>
+                    <span className="font-bold text-blue-800">{BANK_INFO.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-500">Account Number</span>
+                    <span className="font-bold text-blue-800 font-mono">{BANK_INFO.account}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-500">Bank</span>
+                    <span className="font-bold text-blue-800">{BANK_INFO.bank}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-500">Branch</span>
+                    <span className="font-bold text-blue-800">{BANK_INFO.branch}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setCurrentPage('tracking')}
+                  className="flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-gold-500 to-gold-400 text-chocolate-900 rounded-xl font-bold hover:from-gold-400 hover:to-gold-300 transition shadow-lg text-sm"
+                >
+                  <Search size={16} /> Track Order
+                </button>
+                <button
+                  onClick={() => setCurrentPage('orders')}
+                  className="flex items-center justify-center gap-2 py-3 bg-chocolate-800 text-gold-300 rounded-xl font-bold hover:bg-chocolate-700 transition shadow-lg text-sm"
+                >
+                  <Package size={16} /> My Orders
+                </button>
+              </div>
+              <button
+                onClick={() => setCurrentPage('products')}
+                className="w-full mt-3 py-2.5 text-chocolate-500 hover:text-chocolate-700 text-sm font-medium transition"
+              >
+                Continue Shopping →
+              </button>
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  if (items.length === 0) {
+  if (cart.length === 0) {
     return (
-      <div className="bg-[#0d0500] min-h-screen flex flex-col items-center justify-center px-4">
-        <ShoppingCart size={64} className="text-amber-900 mb-4" />
-        <h2 className="text-2xl font-bold text-white mb-2">Your cart is empty</h2>
-        <p className="text-amber-200/50 mb-6">Add some delicious Dubai chocolates!</p>
-        <Link to="/products" className="bg-amber-500 hover:bg-amber-600 text-white px-8 py-3 rounded-xl font-semibold transition-colors">
-          Shop Now
-        </Link>
+      <div className="min-h-screen bg-gradient-to-b from-dubai-cream to-gold-50 flex items-center justify-center py-20">
+        <div className="text-center">
+          <ShoppingBag size={80} className="text-gold-300 mx-auto mb-6" />
+          <h2 className="font-display text-3xl font-bold text-chocolate-900 mb-3">Your Cart is Empty</h2>
+          <p className="text-chocolate-500 mb-6">Add some delicious Dubai chocolates to your cart!</p>
+          <button
+            onClick={() => setCurrentPage('products')}
+            className="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-gold-500 to-gold-400 text-chocolate-900 rounded-xl font-semibold hover:from-gold-400 hover:to-gold-300 transition shadow-lg"
+          >
+            Browse Products <ArrowRight size={18} />
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#0d0500] min-h-screen py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-2xl md:text-3xl font-bold text-white mb-8">Shopping Cart</h1>
+    <div className="min-h-screen bg-gradient-to-b from-dubai-cream to-gold-50 py-8">
+      <div className="max-w-5xl mx-auto px-4">
+        <h1 className="font-display text-3xl font-bold text-chocolate-900 mb-8 flex items-center gap-3">
+          <ShoppingBag className="text-gold-500" /> Shopping Cart
+        </h1>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Cart items */}
+        <div className="grid lg:grid-cols-3 gap-8">
+          {/* Cart Items */}
           <div className="lg:col-span-2 space-y-4">
-            {items.map(item => (
-              <div key={item.productId} className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-4 flex gap-4">
-                <div className="w-20 h-20 rounded-xl overflow-hidden bg-amber-950 flex-shrink-0">
-                  <img src={item.product.imageUrl || '/images/dubai-choc-1.jpg'} alt={item.product.name} className="w-full h-full object-cover" />
+            {cart.map(item => (
+              <div key={item.product.id} className="bg-white rounded-2xl p-4 shadow-lg border border-gold-100 flex gap-4 animate-fadeIn">
+                <img
+                  src={item.product.imageUrl || '/images/dubai-chocolate-1.jpg'}
+                  alt={item.product.name}
+                  className="w-24 h-24 rounded-xl object-cover cursor-pointer hover:opacity-80 transition"
+                />
+                <div className="flex-1">
+                  <h3 className="font-display font-bold text-chocolate-800">{item.product.name}</h3>
+                  <p className="text-sm text-chocolate-400">{item.product.weight}g per unit</p>
+                  <p className="text-lg font-bold text-gold-600 mt-1">LKR {(item.product.price * item.quantity).toLocaleString()}</p>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-white font-medium leading-tight line-clamp-2">{item.product.name}</h3>
-                  <p className="text-amber-200/40 text-xs mt-1">{item.product.weight}kg each</p>
-                  <div className="flex items-center justify-between mt-3">
-                    <div className="flex items-center gap-2 bg-amber-900/20 border border-amber-800/30 rounded-xl px-2 py-1">
-                      <button onClick={() => updateQuantity(item.productId, item.quantity - 1)} className="text-amber-400 hover:text-white p-1 transition-colors">
-                        <Minus size={14} />
-                      </button>
-                      <span className="text-white text-sm font-medium w-5 text-center">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.productId, item.quantity + 1)} className="text-amber-400 hover:text-white p-1 transition-colors">
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-amber-400 font-bold">Rs. {(item.product.price * item.quantity).toLocaleString()}</div>
-                      <div className="text-amber-200/30 text-xs">Rs. {item.product.price.toLocaleString()} each</div>
-                    </div>
+                <div className="flex flex-col items-end justify-between">
+                  <button onClick={() => removeFromCart(item.product.id)} className="text-red-400 hover:text-red-600 transition p-1">
+                    <Trash2 size={18} />
+                  </button>
+                  <div className="flex items-center gap-2 bg-gold-50 rounded-lg p-1">
+                    <button
+                      onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
+                      className="w-8 h-8 rounded-lg bg-white shadow flex items-center justify-center text-chocolate-600 hover:bg-gold-100 transition"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span className="w-8 text-center font-bold text-chocolate-800">{item.quantity}</span>
+                    <button
+                      onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
+                      className="w-8 h-8 rounded-lg bg-white shadow flex items-center justify-center text-chocolate-600 hover:bg-gold-100 transition"
+                    >
+                      <Plus size={14} />
+                    </button>
                   </div>
                 </div>
-                <button onClick={() => removeFromCart(item.productId)} className="text-red-400 hover:text-red-300 transition-colors flex-shrink-0">
-                  <Trash2 size={18} />
-                </button>
               </div>
             ))}
           </div>
 
           {/* Summary */}
-          <div className="space-y-4">
-            <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-6">
-              <h3 className="text-white font-semibold text-lg mb-4">Order Summary</h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between text-amber-200/60">
-                  <span>Subtotal ({items.reduce((s, i) => s + i.quantity, 0)} items)</span>
-                  <span>Rs. {subtotal.toLocaleString()}</span>
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-2xl p-6 shadow-xl border border-gold-100 sticky top-24 space-y-4">
+              <h3 className="font-display text-xl font-bold text-chocolate-900 flex items-center gap-2">
+                <Package className="text-gold-500" /> Order Summary
+              </h3>
+              <div className="space-y-3">
+                <div className="flex justify-between text-chocolate-600">
+                  <span>Subtotal</span>
+                  <span className="font-semibold">LKR {getSubtotal().toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between text-amber-200/60">
-                  <span>Total weight</span>
-                  <span>{totalWeight.toFixed(3)} kg</span>
+                <div className="flex justify-between text-chocolate-600">
+                  <span>Total Weight</span>
+                  <span className="font-semibold">{getTotalWeight()}g</span>
                 </div>
-                <div className="flex justify-between text-amber-200/60">
-                  <span className="flex items-center gap-1"><Truck size={12} /> Delivery charge</span>
-                  <span>Rs. {deliveryCharge}</span>
+                <div className="flex justify-between text-chocolate-600">
+                  <span>Delivery Charge</span>
+                  <span className="font-semibold">LKR {getDeliveryCharge().toLocaleString()}</span>
                 </div>
-                <div className="border-t border-amber-900/30 pt-3 flex justify-between text-white font-bold text-lg">
+                <hr className="border-gold-200" />
+                <div className="flex justify-between text-lg font-bold text-chocolate-900">
                   <span>Total</span>
-                  <span className="text-amber-400">Rs. {total.toLocaleString()}</span>
+                  <span className="text-gold-600">LKR {getTotal().toLocaleString()}</span>
                 </div>
               </div>
 
-              <button
-                onClick={() => {
-                  if (!currentUser) { navigate('/login'); return; }
-                  setCheckout(true);
-                }}
-                className="w-full mt-6 bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"
-              >
-                Proceed to Checkout <ArrowRight size={18} />
-              </button>
-            </div>
-
-            {/* Delivery info */}
-            <div className="bg-amber-900/10 border border-amber-800/20 rounded-2xl p-4">
-              <h4 className="text-amber-400 text-sm font-medium mb-2 flex items-center gap-1"><Truck size={14} /> Delivery Charges</h4>
-              <div className="space-y-1 text-xs text-amber-200/50">
-                <div className="flex justify-between"><span>Up to 0.25kg</span><span>Rs. 150</span></div>
-                <div className="flex justify-between"><span>Up to 0.5kg</span><span>Rs. 250</span></div>
-                <div className="flex justify-between"><span>Up to 0.75kg</span><span>Rs. 350</span></div>
-                <div className="flex justify-between"><span>Up to 1kg</span><span>Rs. 450</span></div>
+              {/* Delivery Info */}
+              <div className="bg-gold-50 rounded-xl p-3 text-xs text-chocolate-500 space-y-1">
+                <p className="font-semibold text-chocolate-700">🚚 Delivery Charges:</p>
+                <p>250g → Rs. 250</p>
+                <p>500g → Rs. 350</p>
+                <p>1kg → Rs. 450</p>
               </div>
+
+              {!showCheckout ? (
+                <button
+                  onClick={() => {
+                    if (!user) {
+                      toast.error('Please login to checkout');
+                      setCurrentPage('login');
+                      return;
+                    }
+                    setShowCheckout(true);
+                  }}
+                  className="w-full py-3 bg-gradient-to-r from-gold-500 to-gold-400 text-chocolate-900 rounded-xl font-bold text-lg hover:from-gold-400 hover:to-gold-300 transition shadow-lg"
+                >
+                  Proceed to Checkout
+                </button>
+              ) : (
+                <div className="space-y-3 animate-fadeIn">
+                  <input
+                    type="text"
+                    placeholder="Phone Number"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                    className="w-full px-4 py-3 bg-gold-50 rounded-xl border border-gold-200 focus:border-gold-500 outline-none text-chocolate-800"
+                  />
+                  <textarea
+                    placeholder="Delivery Address"
+                    value={address}
+                    onChange={e => setAddress(e.target.value)}
+                    rows={3}
+                    className="w-full px-4 py-3 bg-gold-50 rounded-xl border border-gold-200 focus:border-gold-500 outline-none text-chocolate-800 resize-none"
+                  />
+
+                  {/* Bank details in checkout */}
+                  <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 text-xs">
+                    <p className="font-bold text-blue-700 mb-2">🏦 Bank Transfer Details</p>
+                    <p className="text-blue-600"><span className="font-semibold">Name:</span> {BANK_INFO.name}</p>
+                    <p className="text-blue-600"><span className="font-semibold">Account:</span> {BANK_INFO.account}</p>
+                    <p className="text-blue-600"><span className="font-semibold">Bank:</span> {BANK_INFO.bank}</p>
+                    <p className="text-blue-600"><span className="font-semibold">Branch:</span> {BANK_INFO.branch}</p>
+                    <p className="text-blue-500 mt-2 italic">Send payment receipt via WhatsApp after placing order.</p>
+                  </div>
+
+                  <button
+                    onClick={handlePlaceOrder}
+                    disabled={placing}
+                    className="w-full py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl font-bold text-lg hover:from-green-500 hover:to-green-400 transition shadow-lg disabled:opacity-50"
+                  >
+                    {placing ? 'Placing Order...' : '✅ Place Order'}
+                  </button>
+                  <button
+                    onClick={() => setShowCheckout(false)}
+                    className="w-full py-2 text-chocolate-500 hover:text-chocolate-700 text-sm transition"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
-
-        {/* Checkout Form */}
-        {checkout && (
-          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-[#1a0800] border border-amber-900/30 rounded-2xl p-6 max-w-2xl w-full my-4">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-white">Shipping Details</h2>
-                <button onClick={() => setCheckout(false)} className="text-amber-400 hover:text-white transition-colors text-xl">✕</button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div>
-                  <label className="text-amber-300 text-xs font-medium block mb-1">Full Name *</label>
-                  <input type="text" value={form.fullName} onChange={e => setForm(f => ({ ...f, fullName: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="John Silva" />
-                </div>
-                <div>
-                  <label className="text-amber-300 text-xs font-medium block mb-1">Phone *</label>
-                  <input type="tel" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="0707070872" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="text-amber-300 text-xs font-medium block mb-1">Address Line 1 *</label>
-                  <input type="text" value={form.addressLine1} onChange={e => setForm(f => ({ ...f, addressLine1: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="No. 123, Main Street" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="text-amber-300 text-xs font-medium block mb-1">Address Line 2</label>
-                  <input type="text" value={form.addressLine2} onChange={e => setForm(f => ({ ...f, addressLine2: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="Village, Area (optional)" />
-                </div>
-                <div>
-                  <label className="text-amber-300 text-xs font-medium block mb-1">City *</label>
-                  <input type="text" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="Colombo" />
-                </div>
-                <div>
-                  <label className="text-amber-300 text-xs font-medium block mb-1">District *</label>
-                  <input type="text" value={form.district} onChange={e => setForm(f => ({ ...f, district: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="Colombo" />
-                </div>
-                <div>
-                  <label className="text-amber-300 text-xs font-medium block mb-1">Postal Code</label>
-                  <input type="text" value={form.postalCode} onChange={e => setForm(f => ({ ...f, postalCode: e.target.value }))}
-                    className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500" placeholder="10100" />
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <label className="text-amber-300 text-xs font-medium block mb-2">Payment Method</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { value: 'cod', label: '💵 Cash on Delivery' },
-                    { value: 'bank', label: '🏦 Bank Transfer' },
-                  ].map(pm => (
-                    <button
-                      key={pm.value}
-                      onClick={() => setPaymentMethod(pm.value)}
-                      className={`p-3 rounded-xl border text-sm font-medium transition-all ${paymentMethod === pm.value ? 'border-amber-500 bg-amber-500/20 text-amber-300' : 'border-amber-900/30 text-amber-200/50 hover:border-amber-700/50'}`}
-                    >
-                      {pm.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <label className="text-amber-300 text-xs font-medium block mb-1">Order Notes</label>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                  className="w-full bg-amber-950/30 border border-amber-800/30 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 h-20 resize-none" placeholder="Special instructions..." />
-              </div>
-
-              {/* Order total */}
-              <div className="bg-amber-900/20 rounded-xl p-4 mb-6">
-                <div className="flex justify-between text-sm text-amber-200/60 mb-1">
-                  <span>Subtotal</span><span>Rs. {subtotal.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm text-amber-200/60 mb-1">
-                  <span>Delivery ({totalWeight.toFixed(3)}kg)</span><span>Rs. {deliveryCharge}</span>
-                </div>
-                <div className="flex justify-between text-white font-bold text-lg border-t border-amber-800/30 pt-2 mt-2">
-                  <span>Total</span><span className="text-amber-400">Rs. {total.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <button
-                onClick={handlePlaceOrder}
-                disabled={placing}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] disabled:opacity-60"
-              >
-                {placing ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Package size={20} />}
-                {placing ? 'Placing Order...' : 'Place Order'}
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
